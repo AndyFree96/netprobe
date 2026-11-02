@@ -9,5 +9,9 @@ pub struct Cli {
   /// Expected HTTP status code
   #[arg(long, default_value_t = 200)]
   pub expect: u16,
+
+  /// Request timeout in seconds
+  #[arg(long, default_value_t = 10)]
+  pub timeout: u64
 }
 

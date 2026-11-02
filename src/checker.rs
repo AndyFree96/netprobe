@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 use reqwest::StatusCode;
+use tokio::time::{error::Elapsed, timeout};
 
 #[derive(Debug)]
 pub struct CheckResult {
@@ -11,10 +12,19 @@ pub struct CheckResult {
   pub passed: bool
 }
 
-pub async fn check(url: &str, expected_status: u16) -> Result<CheckResult, reqwest::Error> {
+#[derive(Debug)]
+pub enum CheckError {
+    Request(reqwest::Error),
+    Timeout(Elapsed)
+}
+
+pub async fn check(url: &str, 
+  expected_status: u16, 
+  timeout_duration: Duration
+) -> Result<CheckResult, CheckError> {
   let start = Instant::now();
 
-  let response = reqwest::get(url).await?;
+  let response = timeout(timeout_duration, reqwest::get(url)).await.map_err(CheckError::Timeout)?.map_err(CheckError::Request)?;
 
   let latency = start.elapsed();
 
@@ -63,5 +73,25 @@ mod tests {
     let duration = Duration::from_millis(1);
 
     assert_eq!(duration.as_micros(), 1000);
+  }
+
+  #[tokio::test]
+  async fn test_timeout() {
+    let result = timeout(Duration::from_millis(100),
+      tokio::time::sleep(Duration::from_secs(1))
+    ).await;
+
+    assert!(result.is_err());
+  }
+
+  #[tokio::test]
+  async fn test_no_timeout() {
+      let result = timeout(
+          Duration::from_secs(2),
+          tokio::time::sleep(Duration::from_millis(100)),
+      )
+      .await;
+
+      assert!(result.is_ok());
   }
 }
