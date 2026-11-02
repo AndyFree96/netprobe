@@ -5,16 +5,42 @@ use std::{error::Error, time::Duration};
 use clap::Parser;
 
 use cli::Cli;
-use checker::{check, CheckError};
+use checker::{check, CheckError, CheckConfig};
+use reqwest::Method;
+
+use crate::cli::HttpMethod;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
-    print_usage(&cli.url);
+    let client = reqwest::Client::new();
+    let method = match cli.method {
+        HttpMethod::Get => Method::GET,
+        HttpMethod::Post => Method::POST,
+    };
 
-    let time_duration = Duration::from_secs(cli.timeout);
+    let headers = cli
+        .headers
+        .iter()
+        .map(|header| {
+            let (name, value) = header
+                .split_once(':')
+                .expect("Invalid header format");
 
-    match check(&cli.url, cli.expect, time_duration).await {
+            (name.trim().to_string(), value.trim().to_string())
+        })
+        .collect();
+
+    let config = CheckConfig {
+        url: cli.url.clone(),
+        method,
+        expected_status: cli.expect,
+        timeout: Duration::from_secs(cli.timeout),
+        headers,
+        body: cli.body.clone(),
+    };
+
+    match check(&client, &config).await {
         Ok(result) => {
             println!("Status:  {}", result.actual_status);
             println!(
@@ -38,12 +64,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
             println!("Result: ERROR");
             println!("Error: {error}");
         }
+        Err(CheckError::InvalidHeader(error)) => {
+            println!("Result: ERROR");
+            println!("Invalid header: {error}");
+        }
+
+        Err(CheckError::InvalidJson(error)) => {
+            println!("Result: ERROR");
+            println!("Invalid JSON: {error}");
+        }
     }
     Ok(())
-}
-
-fn print_usage(url: &str) {
-    println!("netprobe v0.1.0");
-    println!();
-    println!("Target : {url}");
 }

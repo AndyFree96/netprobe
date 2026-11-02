@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use reqwest::StatusCode;
+use reqwest::{Client, Method, StatusCode, header::{HeaderName, HeaderValue}};
 use tokio::time::{error::Elapsed, timeout};
 
 #[derive(Debug)]
@@ -15,30 +15,80 @@ pub struct CheckResult {
 #[derive(Debug)]
 pub enum CheckError {
     Request(reqwest::Error),
-    Timeout(Elapsed)
+    Timeout(Elapsed),
+    InvalidHeader(String),
+    InvalidJson(serde_json::Error)
 }
 
-pub async fn check(url: &str, 
-  expected_status: u16, 
-  timeout_duration: Duration
+
+#[derive(Debug)]
+pub struct CheckConfig {
+  pub url: String,
+  pub method: Method,
+  pub expected_status: u16,
+  pub timeout: Duration,
+  pub headers: Vec<(String, String)>,
+  pub body: Option<String>,
+}
+
+pub async fn check(
+    client: &Client,
+    config: &CheckConfig,
 ) -> Result<CheckResult, CheckError> {
-  let start = Instant::now();
+    let start = Instant::now();
 
-  let response = timeout(timeout_duration, reqwest::get(url)).await.map_err(CheckError::Timeout)?.map_err(CheckError::Request)?;
+    let mut request = client.request(
+        config.method.clone(),
+        &config.url,
+    );
 
-  let latency = start.elapsed();
+    // 添加自定义请求头
+    for (name, value) in &config.headers {
+        let name = HeaderName::from_bytes(name.as_bytes())
+            .map_err(|error| {
+                CheckError::InvalidHeader(error.to_string())
+            })?;
 
-  let actual_status = response.status();
+        let value = HeaderValue::from_str(value)
+            .map_err(|error| {
+                CheckError::InvalidHeader(error.to_string())
+            })?;
 
-  let passed = actual_status.as_u16() == expected_status;
+        request = request.header(name, value);
+    }
 
-  Ok(CheckResult {
-    url: url.to_string(),
-    expected_status,
-    actual_status,
-    latency,
-    passed,
-  })
+    // 添加 JSON 请求体
+    if let Some(body) = &config.body {
+        let json: serde_json::Value =
+            serde_json::from_str(body)
+                .map_err(CheckError::InvalidJson)?;
+
+        request = request.json(&json);
+    }
+
+    // 发送请求，并执行超时控制
+    let response = timeout(
+        config.timeout,
+        request.send(),
+    )
+    .await
+    .map_err(CheckError::Timeout)?
+    .map_err(CheckError::Request)?;
+
+    let latency = start.elapsed();
+
+    let actual_status = response.status();
+
+    let passed = actual_status.as_u16()
+        == config.expected_status;
+
+    Ok(CheckResult {
+        url: config.url.clone(),
+        expected_status: config.expected_status,
+        actual_status,
+        latency,
+        passed,
+    })
 }
 
 #[cfg(test)]
@@ -86,12 +136,32 @@ mod tests {
 
   #[tokio::test]
   async fn test_no_timeout() {
-      let result = timeout(
-          Duration::from_secs(2),
-          tokio::time::sleep(Duration::from_millis(100)),
-      )
-      .await;
+    let result = timeout(
+        Duration::from_secs(2),
+        tokio::time::sleep(Duration::from_millis(100)),
+    )
+    .await;
 
-      assert!(result.is_ok());
+    assert!(result.is_ok());
+  }
+
+  #[test]
+  fn test_parse_valid_json() {
+    let body = r#"{"name":"Rust","version":"1.0"}"#;
+
+    let result: Result<serde_json::Value, _> =
+        serde_json::from_str(body);
+
+    assert!(result.is_ok());
+  }
+
+  #[test]
+  fn test_parse_invalid_json() {
+      let body = r#"{"name":"Rust""#;
+
+      let result: Result<serde_json::Value, _> =
+          serde_json::from_str(body);
+
+      assert!(result.is_err());
   }
 }
