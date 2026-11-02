@@ -1,15 +1,28 @@
+mod checker;
+mod  cli;
+
 use std::error::Error;
+use clap::Parser;
+
+use cli::Cli;
+use checker::check;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let url = "https://httpbin.org/get";
-    print_usage(url);
+    let cli = Cli::parse();
+    print_usage(&cli.url);
 
-    let response = reqwest::get(url).await?;
-    let status = response.status();
+    let result = check(&cli.url, cli.expect).await?;
 
     println!();
-    println!("Status: {status}");
+    println!("URL: {}", result.url);
+    println!("Expected Status: {}", result.expected_status);
+    println!("Actual Status:   {}", result.actual_status);
+
+    let status = if result.passed { "PASS" } else { "FAIL" };
+
+    println!("Result:          {status}");
+
     Ok(())
 }
 
