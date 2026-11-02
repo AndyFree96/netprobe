@@ -15,9 +15,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let result = check(&cli.url, cli.expect).await?;
 
     println!();
-    println!("URL: {}", result.url);
+    println!("URL:             {}", result.url);
     println!("Expected Status: {}", result.expected_status);
     println!("Actual Status:   {}", result.actual_status);
+    println!("Latency:         {:.2}ms", result.latency.as_secs_f64() * 1000.0);
 
     let status = if result.passed { "PASS" } else { "FAIL" };
 
